@@ -1026,10 +1026,6 @@ max_workers = 3
    Parallelization 接入多 Agent 系统时，每个 Worker 可以升级为一个专家 Agent，Coordinator 负责任务分发，Aggregator 负责结果融合。
    ```
 
-   
-
-
-
 ### 一句话总结
 
 ```
