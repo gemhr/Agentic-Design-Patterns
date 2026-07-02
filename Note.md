@@ -1352,13 +1352,72 @@ Planning：我还不知道步骤，让模型先规划步骤。
 
 
 
+## Part One 总结
 
+Agent 不是一个单纯的聊天模型，而是一套“任务理解、路径选择、工具执行、结果检查、多角色协作”的工程系统。
 
+### 模式总览
 
+| 章节 | 模式                        | 核心问题                 | 一句话理解                       |
+| ---- | --------------------------- | ------------------------ | -------------------------------- |
+| 1    | Prompt Chaining             | 复杂任务如何分步骤完成   | 把大任务拆成多个连续小步骤       |
+| 2    | Routing                     | 不同任务应该走哪条路径   | 先判断任务类型，再交给合适处理器 |
+| 3    | Parallelization             | 多个独立任务如何同时执行 | 多个 Worker 并行做，最后汇总     |
+| 4    | Reflection                  | 输出结果如何检查和修正   | 先生成，再审查，再修改           |
+| 5    | Tool Use / Function Calling | Agent 如何调用真实能力   | 模型决策，程序执行工具           |
+| 6    | Planning                    | 复杂任务执行前如何规划   | 先生成计划，再按计划执行         |
+| 7    | Multi-Agent Collaboration   | 多个 Agent 如何协作      | 多个专家 Agent 分工合作          |
 
+### 每一节的核心
 
+1. Prompt Chaining 分步骤做
+2. Routing 选择路径
+3. Parallelization 并行执行，多个互不依赖的子任务可以同时执行，然后由 Aggregator 汇总
+4. Reflection 检查与修正，解决第一次结果不够可靠怎么办
+5. Tool Use/Function Calling 调用真实工具，模型负责判断要用什么工具，程序负责安全执行工具
+6. Planning 先规划再执行，解决复杂任务应该怎么安排步骤
+7. Mult-Agent Collaboration 多Agent 分工协作，解决多个 Agent 谁负责什么，以及如何协作 
 
+### 七个模式之间的关系
 
+这七个模式可以串成一个完整 Agent 工作流：
+
+```
+用户输入
+→ Routing：判断任务类型
+→ Planning：制定执行计划
+→ Tool Use：调用真实工具
+→ Prompt Chaining：组织多步骤流程
+→ Parallelization：并行执行独立任务
+→ Multi-Agent：分配给不同专家 Agent
+→ Reflection：检查和修正最终结果
+→ 输出答案
+```
+
+更具体一点：
+
+```
+Routing 负责选方向；
+Planning 负责任务拆解；
+Tool Use 负责真实执行；
+Prompt Chaining 负责顺序编排；
+Parallelization 负责并发加速；
+Multi-Agent 负责角色分工；
+Reflection 负责质量控制。
+```
+
+如果压缩成一句话：
+
+```
+Routing 选路，Planning 定步骤，Tool Use 做事，Prompt Chaining 串流程，Parallelization 提效率，Multi-Agent 做分工，Reflection 保质量。
+```
+
+### 对 Agent 工程的认识
+
+1. Agent 不是一个大 Prompt
+2. 模型不是执行者，程序才是
+3. 复杂任务必须可观察
+4. Agent 工程的核心不是更聪明，而是更可控
 
 
 

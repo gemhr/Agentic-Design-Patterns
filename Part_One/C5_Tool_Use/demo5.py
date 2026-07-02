@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# Part_One/C5_Tool_Use/demo.py
+# Part_One/C5_Tool_Use/demo2.py
 
 import asyncio
 import json
@@ -16,7 +16,7 @@ from typing import Any, Callable
 # 处理项目内模块导入
 # ============================================================
 # 当前文件路径：
-# Part_One/C5_Tool_Use/demo.py
+# Part_One/C5_Tool_Use/demo2.py
 #
 # parents[2] 对应项目根目录：
 # Agentic-Design-Patterns/
