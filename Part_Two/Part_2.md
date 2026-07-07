@@ -3273,3 +3273,857 @@ Tool Use 是会用工具，MCP 是让工具接入变成标准。
 ```
 LocalAgent 未来要从“内部工具调用系统”升级到“标准化工具协议系统”，MCP 就是最值得学习的方向。
 ```
+
+## 第二章总结 从会执行任务，到能长期稳定工作
+
+第二章学完后，核心认知应该从第一章的：
+
+```text
+Agent 如何完成一个任务？
+```
+
+升级为：
+
+```text
+Agent 如何在长期任务中保持连续性、持续改进、标准化接入工具，并围绕目标稳定执行？
+```
+
+第一章七个模式更偏 **任务执行编排**：
+
+```text
+Routing
+Planning
+Tool Use
+Reflection
+Parallelization
+Prompt Chaining
+Multi-Agent Collaboration
+```
+
+第二章这四节更偏 **长期运行能力**：
+
+```text
+Memory Management
+Learning and Adaptation
+MCP
+Goal Setting and Monitoring
+```
+
+一句话总结第二章：
+
+```text
+第二章讲的是：让 Agent 不只是“能做一次任务”，而是能记住上下文、从错误中改进、通过标准协议接入工具，并始终围绕目标执行。
+```
+
+### 四个核心能力总览
+
+| 小节                        | 能力           | 核心问题                         | 一句话理解                                    |
+| --------------------------- | -------------- | -------------------------------- | --------------------------------------------- |
+| Memory Management           | 记忆管理       | Agent 如何保存和使用历史信息     | 不是记住所有内容，而是管理有用记忆            |
+| Learning and Adaptation     | 学习与适应     | Agent 如何从反馈和错误中变好     | 不只是记住过去，而是从过去中改进未来          |
+| MCP                         | 模型上下文协议 | Agent 如何标准化连接工具和数据源 | Tool Use 是会用工具，MCP 是让工具接入变成标准 |
+| Goal Setting and Monitoring | 目标设定与监控 | Agent 如何不跑偏、知道何时停止   | Goal Setting 定目标，Monitoring 防跑偏        |
+
+这四节共同解决的是：
+
+```text
+Agent 长期运行时的连续性、可改进性、可扩展性和可控性。
+```
+
+### Memory Management：让 Agent 记得有用信息
+
+Memory Management 的核心是：
+
+```text
+在有限上下文窗口之外，管理 Agent 应该记住什么、什么时候取出来用、什么时候压缩和遗忘。
+```
+
+它不是简单地把所有历史对话塞进 prompt。
+
+正确理解是：
+
+```text
+该记的记；
+该忘的忘；
+该压缩的压缩；
+该检索的检索；
+该注入上下文时再注入。
+```
+
+#### 它解决什么问题
+
+如果没有记忆管理，Agent 会遇到：
+
+```text
+1. 多轮对话容易忘记前文；
+2. 长任务容易丢失早期约束；
+3. 用户偏好无法长期保留；
+4. 项目背景每次都要重新解释；
+5. 工具调用经验无法复用；
+6. 所有历史塞进上下文会造成噪声和成本增加；
+7. 旧信息和新信息冲突时无法处理。
+```
+
+#### 需要掌握的关键概念
+
+```text
+Context：
+当前模型调用时能看到的内容。
+
+Memory：
+长期保存、需要时再检索出来使用的信息。
+
+Short-Term Memory：
+当前会话和当前任务的短期上下文。
+
+Long-Term Memory：
+跨会话、跨任务保存的稳定信息。
+
+Episodic Memory：
+记录发生过什么。
+
+Semantic Memory：
+记录稳定知识。
+
+Procedural Memory：
+记录怎么做。
+```
+
+#### 核心流程
+
+```text
+Observe
+→ Decide
+→ Store
+→ Retrieve
+→ Compress
+→ Forget
+→ Inject
+→ Use
+```
+
+也可以简化成：
+
+```text
+写入记忆
+→ 检索记忆
+→ 注入上下文
+→ 使用记忆
+→ 更新记忆
+```
+
+#### 工程重点
+
+Memory Management 工程上最重要的是：
+
+```text
+1. 不要什么都记；
+2. 不要把所有历史都塞进上下文；
+3. 记忆要结构化；
+4. 记忆要能检索；
+5. 记忆要能更新和过期；
+6. 敏感信息不能写入长期记忆；
+7. 记忆要能帮助 Router、Planner、Tool Use、Reflection。
+```
+
+对于你的 LocalAgent，比较合适的结构是：
+
+```text
+最近 N 轮对话：短期记忆；
+滚动摘要：当前会话主线；
+SQLite + FTS5：结构化长期记忆；
+Chroma：语义检索记忆 / 项目知识；
+Tool Log：工具调用记忆；
+Bad Case：失败样例记忆。
+```
+
+### Learning and Adaptation：让 Agent 从错误中变好
+
+Learning and Adaptation 的核心是：
+
+```text
+把用户反馈、工具结果、bad case 和评估指标转化为 Agent 后续行为策略的改进。
+```
+
+它和 Memory 的区别是：
+
+```text
+Memory 是保存信息；
+Learning 是利用信息改变行为。
+```
+
+例如：
+
+```text
+Memory：
+记住用户已经实现 AsyncLLMClient。
+
+Learning：
+以后异步 demo 默认基于这个 AsyncLLMClient，不再建议用户重新改造客户端。
+```
+
+#### 它解决什么问题
+
+Agent 系统不可能一开始就完美。
+
+它会出现：
+
+```text
+1. Router 分错任务；
+2. Tool Call 参数错误；
+3. RAG 召回无关内容；
+4. Reflection 漏检；
+5. Planner 计划太空；
+6. 回答不符合用户偏好；
+7. 工具经常失败；
+8. 同类 bad case 重复出现。
+```
+
+Learning and Adaptation 的作用是：
+
+```text
+把一次失败变成后续优化的依据。
+```
+
+#### 核心流程
+
+```text
+Observe
+→ Evaluate
+→ Diagnose
+→ Adapt
+→ Validate
+```
+
+中文就是：
+
+```text
+观察执行过程
+→ 评估是否成功
+→ 诊断失败原因
+→ 调整策略
+→ 回归验证
+```
+
+#### Agent 可以从哪里学习
+
+```text
+1. 用户显式反馈；
+2. 用户隐式反馈；
+3. 工具执行结果；
+4. Bad Case；
+5. 自动评估指标。
+```
+
+其中最重要的是 bad case。
+
+因为 bad case 能把“感觉不对”变成：
+
+```text
+哪个输入错了；
+期望是什么；
+实际是什么；
+哪个模块错了；
+错误类型是什么；
+根因是什么；
+怎么修；
+如何防止回归。
+```
+
+#### 学习不等于微调模型
+
+这一点很重要。
+
+在 Agent 工程中，Learning and Adaptation 大多数时候不是训练模型参数，而是：
+
+```text
+1. 修改 Prompt；
+2. 增加规则；
+3. 更新记忆；
+4. 调整工具调用策略；
+5. 优化工具 schema；
+6. 更新默认参数；
+7. 修改 Agent 职责边界；
+8. 增加 bad case 测试集；
+9. 优化检索策略；
+10. 加强 Reflection 检查清单。
+```
+
+对你当前阶段来说，最值得做的是：
+
+```text
+Prompt 优化
+规则优化
+工具 schema 优化
+记忆更新
+bad case 回归测试
+自动评估报告
+```
+
+而不是一上来就做模型微调。
+
+#### 和 LocalAgent 的关系
+
+Learning and Adaptation 可以成为你 LocalAgent 的一个亮点。
+
+例如：
+
+```text
+Router 错分任务
+→ 记录 expected_route 和 actual_route
+→ 加入 Router 回归集
+→ 优化规则和 Prompt
+→ 统计 Router Accuracy
+
+Tool Call 参数错误
+→ 记录 expected_tool / expected_arguments
+→ 优化 schema 和参数校验
+→ 统计 Tool Call Accuracy
+
+RAG 召回失败
+→ 记录 expected_docs
+→ 优化 query rewrite、chunk、rerank
+→ 统计 Recall@K
+
+Reflection 漏检
+→ 记录漏检类型
+→ 更新 Critic 检查清单
+→ 统计 Reflection Repair Rate
+```
+
+这一节本质上已经和你的“Agent 自动评估与回归测试平台”高度重合。
+
+### MCP：让工具接入标准化
+
+MCP 的核心是：
+
+```text
+用统一协议把 AI 应用和外部工具、数据源、Prompt 工作流连接起来，让 Agent 的上下文和能力可以标准化、可复用、可组合。
+```
+
+再简单一点：
+
+```text
+Tool Use 是会用工具；
+MCP 是让工具接入变成标准。
+```
+
+#### 它解决什么问题
+
+没有 MCP 时，每个 Agent 项目都要自己写一套工具接入逻辑：
+
+```text
+文件工具一套；
+Excel 工具一套；
+RAG 工具一套；
+数据库工具一套；
+GitHub 工具一套；
+测试工具一套。
+```
+
+这些工具通常只能在当前项目内部用。
+
+MCP 想解决的是：
+
+```text
+工具、资源、Prompt 工作流如何被不同 AI 应用用统一方式发现和调用。
+```
+
+#### 核心架构
+
+MCP 的三个重要角色：
+
+```text
+Host：
+面向用户的 AI 应用，例如 LocalAgent、Claude Desktop、Cursor。
+
+Client：
+Host 内部连接某个 MCP Server 的协议客户端。
+
+Server：
+真正提供工具、资源和 Prompt 的能力服务。
+```
+
+典型结构：
+
+```text
+LocalAgent Host
+├─ MCP Client A → filesystem_mcp_server
+├─ MCP Client B → excel_mcp_server
+├─ MCP Client C → rag_mcp_server
+└─ MCP Client D → memory_mcp_server
+```
+
+#### Server 暴露的三类能力
+
+```text
+Tools：
+可执行动作，例如 inspect_excel、read_file、run_tests。
+
+Resources：
+可读取上下文，例如 README、日志、知识库片段、Excel sheet 摘要。
+
+Prompts：
+可复用提示词模板，例如 code_review_prompt、generate_aw_script_prompt。
+```
+
+最重要的区分是：
+
+```text
+Tool 是做事；
+Resource 是给上下文；
+Prompt 是提供任务模板。
+```
+
+#### 协议层要掌握什么
+
+MCP 底层使用 JSON-RPC 2.0。
+
+学习阶段至少要理解这些方法：
+
+```text
+initialize：
+初始化连接和能力协商。
+
+tools/list：
+列出 Server 暴露的工具。
+
+tools/call：
+调用某个工具。
+
+resources/list：
+列出资源。
+
+resources/read：
+读取资源。
+
+prompts/list：
+列出 Prompt 模板。
+
+prompts/get：
+获取并填充 Prompt 模板。
+```
+
+#### Transport
+
+MCP 常见传输方式：
+
+```text
+stdio：
+适合本地 MCP Server。
+
+Streamable HTTP：
+适合远程服务或团队共享 Server。
+```
+
+对你当前阶段来说，应该优先学：
+
+```text
+本地 stdio MCP Server
+```
+
+因为你的文件工具、Excel 工具、RAG 工具、测试工具都适合先本地化。
+
+#### 安全重点
+
+MCP 很强，但风险也高。
+
+必须注意：
+
+```text
+1. 工具白名单；
+2. 参数校验；
+3. 用户确认；
+4. 只读和写操作分级；
+5. 本地 HTTP Server 绑定 localhost；
+6. 不暴露敏感数据；
+7. Server 不应该看到完整对话；
+8. 高风险工具必须人工确认。
+```
+
+尤其是：
+
+```text
+覆盖 Excel；
+删除文件；
+执行 shell；
+更新数据库；
+发送邮件；
+修改项目代码。
+```
+
+这些都不能让模型直接无确认执行。
+
+#### 和 LocalAgent 的关系
+
+LocalAgent 里适合 MCP 化的能力：
+
+```text
+filesystem_mcp_server：
+文件读取、搜索、目录浏览。
+
+excel_mcp_server：
+Excel 检查、sheet 分析、列匹配、覆盖写入。
+
+rag_mcp_server：
+知识库检索、文档片段读取。
+
+memory_mcp_server：
+记忆检索、记忆写入、bad case 查询。
+
+test_mcp_server：
+语法检查、pytest 执行、测试结果解析。
+
+aw_script_mcp_server：
+AW 脚本模板、脚本生成、规则校验。
+```
+
+但不是所有东西都适合 MCP 化。
+
+应该继续留在 Host 内部的能力：
+
+```text
+Router；
+Planner；
+Aggregator；
+Reviewer；
+Prompt Chaining 中间流程；
+LLMClient / AsyncLLMClient；
+UI 状态管理；
+当前会话短期上下文。
+```
+
+判断标准：
+
+```text
+如果它是“Agent 内部怎么思考和编排”，留在 Host 内部；
+如果它是“外部可调用的工具或数据源能力”，适合 MCP 化。
+```
+
+### Goal Setting and Monitoring：让 Agent 不跑偏
+
+Goal Setting and Monitoring 的核心是：
+
+```text
+让 Agent 明确“要达成什么”，并在执行过程中持续检查“是否正在达成它”。
+```
+
+再简单一点：
+
+```text
+Goal Setting 定目标；
+Monitoring 防跑偏。
+```
+
+#### 它解决什么问题
+
+Agent 执行任务时常见问题是：
+
+```text
+1. 做着做着偏离用户目标；
+2. 计划步骤很多，但没有完成标准；
+3. 工具调用越来越多，却不知道是否够了；
+4. Reflection 检查了文本质量，却没检查目标是否完成；
+5. Multi-Agent 各自输出，但最终目标没有闭环；
+6. Agent 无限循环、反复检索、反复修正；
+7. 最终回答看起来完整，但没真正解决问题。
+```
+
+Goal Setting and Monitoring 解决的是：
+
+```text
+目标不清晰、执行跑偏、停止条件不明确。
+```
+
+#### 核心结构
+
+一个目标对象应该包含：
+
+```text
+Goal：
+主目标。
+
+Sub-goal：
+子目标。
+
+Success Criteria：
+成功标准。
+
+Constraint：
+约束条件。
+
+Stop Condition：
+停止条件。
+```
+
+它们的关系是：
+
+```text
+Goal：最终要去哪里；
+Sub-goal：中途要经过哪些点；
+Success Criteria：怎样算到达；
+Constraint：路上不能违反什么规则；
+Stop Condition：什么时候该停下来。
+```
+
+#### 和 Planning 的区别
+
+```text
+Goal Setting 关注：要达成什么；
+Planning 关注：怎么达成；
+Monitoring 关注：有没有走偏、是否完成、是否该停。
+```
+
+一句话：
+
+```text
+Goal Setting 定方向；
+Planning 定路线；
+Monitoring 看有没有走偏。
+```
+
+#### 和 Reflection 的区别
+
+```text
+Monitoring：
+执行过程中的目标检查。
+
+Reflection：
+最终输出后的质量检查。
+```
+
+二者组合后：
+
+```text
+Monitoring 控制过程不跑偏；
+Reflection 检查最终答案质量。
+```
+
+#### Monitoring 应监控什么
+
+```text
+1. Goal Alignment：当前步骤是否和目标一致；
+2. Sub-goal Completion：子目标完成度；
+3. Constraint Compliance：是否遵守约束；
+4. Tool Status：工具是否成功；
+5. Progress：是否真正推进；
+6. Cost and Limit：工具次数、重试次数、耗时；
+7. Stop Condition：是否应该停止。
+```
+
+#### 和 LocalAgent 的关系
+
+LocalAgent 可以在 Router 后加入 Goal Extractor：
+
+```text
+用户输入
+→ Router 判断任务类型
+→ Goal Extractor 提取目标
+→ Planner 生成计划
+→ Executor 执行
+→ Monitor 监控目标进度
+→ Reviewer 检查最终答案
+```
+
+还可以把目标进度接入 `[[ORCH]]`：
+
+```text
+goal_created
+goal_progress
+goal_violation
+goal_completed
+goal_failed
+```
+
+这样前端可以显示：
+
+```text
+当前目标是什么；
+哪些子目标完成了；
+当前卡在哪里；
+有没有偏离目标；
+是否已经完成。
+```
+
+评估指标可以包括：
+
+```text
+Goal Completion Rate；
+Constraint Violation Rate；
+Goal Drift Rate；
+Over-execution Rate；
+Stop Accuracy。
+```
+
+### 四节之间的关系
+
+这四节不是孤立的，而是一个完整闭环。
+
+```text
+Memory Management：
+保存和检索历史信息。
+
+Learning and Adaptation：
+根据历史反馈和 bad case 改进行为。
+
+MCP：
+用标准协议连接外部工具、资源和 Prompt。
+
+Goal Setting and Monitoring：
+定义目标并监控执行过程。
+```
+
+可以串成一个完整 Agent 长期运行流程：
+
+```text
+用户输入
+→ Goal Setting 明确目标和成功标准
+→ Memory Retrieval 检索相关历史和项目背景
+→ Planning 生成执行计划
+→ Tool Use / MCP 调用标准化工具
+→ Monitoring 检查执行是否对齐目标
+→ Reflection 检查最终输出质量
+→ Learning 根据反馈和 bad case 更新策略
+→ Memory 更新长期记忆
+```
+
+更简洁地说：
+
+```text
+Goal 决定要做什么；
+Memory 提供历史上下文；
+MCP 提供外部能力；
+Monitoring 保证过程不跑偏；
+Learning 让系统下次做得更好。
+```
+
+### 第二章和第一章的关系
+
+第一章学的是 Agent 的执行积木：
+
+```text
+Prompt Chaining：分步骤；
+Routing：选路径；
+Parallelization：并行；
+Reflection：自检；
+Tool Use：用工具；
+Planning：做计划；
+Multi-Agent：多角色协作。
+```
+
+第二章学的是 Agent 的长期能力：
+
+```text
+Memory：记得上下文；
+Learning：从错误中改进；
+MCP：标准化接入工具和资源；
+Goal Monitoring：围绕目标执行并停止。
+```
+
+第一章更像：
+
+```text
+一个 Agent 怎么完成当前任务。
+```
+
+第二章更像：
+
+```text
+一个 Agent 怎么长期稳定地工作。
+```
+
+两章组合起来就是：
+
+```text
+第一章让 Agent 会做事；
+第二章让 Agent 长期、可控、可改进、可扩展地做事。
+```
+
+### 映射到 LocalAgent 的整体架构
+
+结合你自己的 LocalAgent，可以整理成这样：
+
+```text
+LocalAgent Host
+├─ UI / Chat Interface
+├─ core_router
+├─ Goal Extractor
+├─ Planner
+├─ Agent Coordinator
+│  ├─ code_expert
+│  ├─ data_analyst
+│  ├─ knowledge_expert
+│  └─ aw_script_expert
+├─ Tool Layer / MCP Layer
+│  ├─ filesystem_mcp_server
+│  ├─ excel_mcp_server
+│  ├─ rag_mcp_server
+│  ├─ memory_mcp_server
+│  └─ test_mcp_server
+├─ Memory System
+│  ├─ recent messages
+│  ├─ rolling summary
+│  ├─ SQLite + FTS5
+│  └─ Chroma
+├─ Monitoring System
+│  ├─ goal_created
+│  ├─ goal_progress
+│  ├─ goal_violation
+│  ├─ goal_completed
+│  └─ goal_failed
+├─ Evaluation & Adaptation
+│  ├─ feedback_logs
+│  ├─ bad_cases
+│  ├─ test_cases
+│  ├─ run_results
+│  └─ evaluation_reports
+└─ Reviewer / Reflection
+```
+
+这一套说出来，就已经不是普通 Demo 了，而是一个比较完整的 Agent 工程系统。
+
+### 第二章的面试表达
+
+可以这样整体回答：
+
+```text
+第二章我理解为 Agent 的长期运行能力建设。第一章解决的是 Agent 如何完成一次任务，而第二章解决的是 Agent 如何在长期任务中保持连续性、可控性和可改进性。
+
+Memory Management 负责管理历史信息，不是把所有历史塞进 prompt，而是选择性保存、检索、压缩、遗忘和注入上下文。
+
+Learning and Adaptation 负责让 Agent 根据用户反馈、工具执行结果、bad case 和评估指标持续改进，它不等同于微调模型，更多是优化 Prompt、规则、工具 schema、记忆和回归测试集。
+
+MCP 则是 Tool Use 的标准化协议层，它通过 Host、Client、Server 架构，让 AI 应用可以统一发现和调用外部 Tools、Resources 和 Prompts。
+
+Goal Setting and Monitoring 负责目标管理，在执行前明确主目标、子目标、成功标准、约束和停止条件，并在执行过程中监控是否偏离目标、是否需要重新规划、是否应该停止。
+
+这四个能力组合起来，可以让 Agent 从“能回答问题”升级为“能长期围绕目标、调用标准化工具、复用历史经验，并通过评估不断改进”的工程系统。
+```
+
+结合 LocalAgent 可以这样说：
+
+```text
+在 LocalAgent 中，我可以把 Memory Management 设计成多层记忆系统，包括最近对话、滚动摘要、SQLite + FTS5 长期记忆和 Chroma 语义检索。Learning and Adaptation 则接入自动评估平台，把 Router 错误、Tool Call 参数错误、RAG 召回失败、Reflection 漏检等记录为 bad case，并转成回归测试。MCP 层可以把文件、Excel、RAG、Memory、测试执行等能力封装成标准 MCP Server。Goal Setting and Monitoring 则放在 Router 后面，把用户请求转成结构化目标，并通过 [[ORCH]] 事件持续展示目标进度、约束违反和完成状态。这样 LocalAgent 不只是一个聊天助手，而是一个可观测、可评估、可扩展、可持续改进的 Agent 平台。
+```
+
+### 第二章最终一句话总结
+
+```text
+第二章的核心，是让 Agent 具备长期上下文、持续改进、标准工具接入和目标闭环能力。
+```
+
+再压缩一点：
+
+```text
+Memory 让 Agent 记得住；
+Learning 让 Agent 改得好；
+MCP 让 Agent 接得广；
+Goal Monitoring 让 Agent 不跑偏。
+```
+
+最终可以浓缩成一句工程表达：
+
+```text
+一个真正可用的 Agent 系统，不只是能调用模型和工具，还必须能管理记忆、吸收反馈、标准化连接外部能力，并在执行过程中持续对齐用户目标。
+```
+
