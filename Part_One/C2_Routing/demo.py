@@ -1,4 +1,4 @@
-# Part_One/C2_Routing/demo.py
+# Part_One/C2_Routing/demo2.py
 import sys
 from pathlib import Path
 
@@ -7,7 +7,7 @@ from pathlib import Path
 # 处理项目内模块导入
 # ============================================================
 # 当前文件路径：
-# Part_One/C2_Routing/demo.py
+# Part_One/C2_Routing/demo2.py
 #
 # parents[2] 对应项目根目录：
 # Agentic-Design-Patterns/
