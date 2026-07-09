@@ -344,7 +344,7 @@ class AsyncLLMClient(BaseLLMConfig):
                 return response.json()
             except json.JSONDecodeError as exc:
                 raise RuntimeError(
-                    f"模型返回内容不是合法 JSON，原始响应为：{response.text[:1000]}"
+                    f"模型返回内容不是合法 JSON，原始响应该为：{response.text[:1000]}"
                 ) from exc
 
         except httpx.TimeoutException as exc:
