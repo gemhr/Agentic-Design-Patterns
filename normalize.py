@@ -15,16 +15,16 @@ AW 顺序状态解耦 / Normalized 生成脚本
 
 Pass 1
 ------
-1. 每个 IP 独立从 default.txt 中的默认值初始化 current_state。
+1. 每个处理单元的 current_state 初始为空。
 2. 严格按 用例执行列表_5G.xls 原始顺序扫描。
 3. 在每个 Case 的：
 
        set TestCtrlInfoList {
 
-   下一行插入“前序 Case 中已经真实出现过”的受控变量历史状态。
-4. 从未在前序 Case 中出现过的受控变量不主动插入。
-5. 即使已跟踪变量的当前状态 == 默认值，也照样显式写入。
-6. current_state 只根据“原始 AW 中的 WSym”推进。
+   下一行插入“前序 Case 中已经写入过非默认值”的受控变量历史状态。
+4. 从未在前序 Case 中写入过非默认值的受控变量不主动插入。
+5. 原始 AW 中写入默认值的受控 WSym 会被删除，不推进 current_state。
+6. current_state 只根据“原始 AW 中写入非默认值的 WSym”推进。
    新增的前置写入和恢复写入绝不参与状态推进。
 
 Pass 2
@@ -39,9 +39,10 @@ Pass 2
        }
 
    中，RecoveryList 前面的那个 } 之前插入恢复脚本。
-2. Pass 1 前置插入的全部已跟踪受控变量都恢复到 default.txt 默认值。
-3. 当前 Case 自己修改过的受管变量也恢复。
-4. 同一个状态项在当前 Case 中写多次：
+2. Pass 1 前置插入的全部已跟踪受控变量都恢复到 DSP JSON 默认值。
+3. 当前 Case 自己写入过非默认值的受管变量也恢复。
+4. 当前 Case 写入默认值的受管变量已在 Pass 1 删除，因此不会新增恢复写入。
+5. 同一个状态项在当前 Case 中写多次非默认值：
    - 原脚本全部保留；
    - 历史状态取最后一次；
    - 恢复只写一次；
@@ -49,16 +50,19 @@ Pass 2
 
 状态键
 ======
-暂时忽略 DSP ID（WSym 第一个参数）。
+DSP ID（WSym 第一个参数）参与状态键，多个 DSP 分别跟踪。
 
 DSP_WSym:
-    (BBH/BBL, Core ID, Variable, Offset=0)
+    (BBH/BBL, DSP ID, Core ID, Variable, Offset=0)
 
 DSP_WSymOffset:
-    (BBH/BBL, Core ID, Variable, Offset)
+    (BBH/BBL, DSP ID, Core ID, Variable, Offset)
 
 DSP_WSymAuto:
-    (BBH/BBL, Core ID=5, Variable, Offset=0)
+    (BBH/BBL, DSP ID, Core ID=5, Variable, Offset=0)
+
+board_sensitive 变量还会把 AW target 加入状态键，避免同一 IP 下不同版型
+的 BBL 单板互相覆盖状态。
 
 板型
 ====
@@ -66,46 +70,45 @@ DSP_WSymAuto:
     enb0          -> BBH
     其他 enb数字   -> BBL
 
-默认值 TXT
-==========
-例如：
+外部 JSON
+=========
+environment_board_mapping.json：
+    使用 environments[IP][target].board 查询具体版型。
+    映射中不存在当前 IP 时，直接跳过该 IP。
 
-    BBL    DSP_RSym(0,5,"g_lrcDynSpecSwitch",4)             1
-    BBH    DSP_RSym(0,1,"g_puschNOrthDmrsMngFrmType",4)     无
+dsp_defaults.json：
+    common 与 board_sensitive 是同级字段，完全替代旧 default.txt。
 
-“无”表示该变量不参与：
-    - 状态跟踪
-    - 前置写入
-    - 默认恢复
+common：
+    只按 BBH/BBL、DSP ID、Core ID、Variable、Offset 匹配默认值。
 
-但不会删除原 AW 中已有命令。
-
-DSP_RSym 的 len 用来反推 Offset：
-
-    offset = len - 4
-
-当前 Offset 要求必须是 4 的整数倍。
+board_sensitive：
+    先按 IP 和 AW target 查询版型，再从 defaults_by_board 选默认值：
+    1. 当前版型存在当前 DSP ID：使用精确值；
+    2. 否则使用第一个包含当前 DSP ID 的版型值；
+    3. 仍不存在时，使用 defaults_by_board 中第一个版型的第一个值。
 
 受控变量规则
 ============
-default.txt 只承担两个职责：
+DSP 默认值 JSON 承担两个职责：
 
 1. 判断某条 WSym 是否属于受控变量；
 2. 提供该受控变量的默认恢复值。
 
-并不要求每个 IP 都必须出现 default.txt 中的全部变量。
+并不要求每个 IP 都必须出现 JSON 中的全部变量。
 
-状态集合按当前 IP 的原始执行顺序动态增长：
+状态集合按当前处理单元的原始执行顺序动态增长：
 
-- 某个受控变量从未在前序 Case 中出现：
+- 某个受控变量从未在前序 Case 中写入过非默认值：
   不在当前 Case 开头补写；
-- 当前 Case 第一次真实写到该受控变量：
+- 当前 Case 写入该受控变量的默认值：
+  删除该原始 WSym，不推进历史状态，也不在当前 Case 结尾新增恢复写入；
+- 当前 Case 第一次写入该受控变量的非默认值：
   保留原始写入，并在当前 Case 结尾恢复默认值；
 - 从下一个 Case 开始：
-  该变量进入历史状态链，按前序 Case 最后的真实写入值在开头补写；
-- 即使历史值等于默认值，也照样显式补写；
-- 当前 Case 结束时，所有开头补写过的受控变量和当前 Case 自己写过的受控变量，
-  都恢复到 default.txt 默认值。
+  该变量进入历史状态链，按前序 Case 最后的非默认写入值在开头补写；
+- 当前 Case 结束时，所有开头补写过的受控变量和当前 Case 自己写入过
+  非默认值的受控变量，都恢复到 DSP JSON 默认值。
 
 前置/恢复脚本始终复用当前 IP 中真实出现过的 WSym 行作为模板，
 只替换真正的数据参数。
@@ -116,6 +119,15 @@ default.txt 只承担两个职责：
     - 命中受管变量数
     - 未命中 StateKey 样例
     - 解析失败 WSym 样例
+
+异常隔离
+========
+1. 单个 Case AW 加载失败：记录错误并跳过，其他 Case 按原顺序继续；
+   接受后续历史状态可能缺少失败 Case 的影响。
+2. 单个 Case 的 Pass 1/Pass 2 已知格式或写入错误：跳过该 Case。
+3. 处理单元未知异常：跳过该处理单元，继续同 IP 的其他处理单元。
+4. IP 未知异常：跳过该 IP；串行和并发 IP 模式行为一致。
+5. 全局 JSON 无法加载、远程根目录无法扫描等启动条件错误仍会终止任务。
 
 UNC / 并发优化
 ==============
@@ -133,6 +145,7 @@ UNC / 并发优化
 from __future__ import annotations
 
 import faulthandler
+import json
 import os
 import re
 import sys
@@ -155,9 +168,13 @@ REMOTE_ROOT = Path(
     r"\\7.213.207.64\opt\data1\UCI\workspace\UCI_Script\26B\TestCase_26B"
 )
 
-DEFAULT_VALUE_TXT = Path(
+BOARD_MAPPING_JSON = Path(
     __file__
-).parent / "default.txt"
+).parent / "environment_board_mapping.json"
+
+DSP_DEFAULTS_JSON = Path(
+    __file__
+).parent / "dsp_defaults.json"
 
 # ------------------------------------------------------------
 # IP 运行模式
@@ -233,17 +250,6 @@ WSYM_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 
-RSYM_PATTERN = re.compile(
-    r'DSP_RSym\s*'
-    r'\(\s*'
-    r'([^,]+?)\s*,\s*'
-    r'([^,]+?)\s*,\s*'
-    r'\\?"([^"]+?)\\?"\s*,\s*'
-    r'([^)]+?)'
-    r'\s*\)',
-    flags=re.IGNORECASE,
-)
-
 NUMBER_PATTERN = re.compile(
     r"[-+]?(?:0[xX][0-9A-Fa-f]+|\d+)"
 )
@@ -280,20 +286,37 @@ def log(message: str) -> None:
 # ============================================================
 
 @dataclass(frozen=True)
-class StateKey:
+class DefaultKey:
     section: str
     core_id: int
     variable: str
     offset: int
 
 
+@dataclass(frozen=True)
+class StateKey:
+    section: str
+    dsp_id: int
+    core_id: int
+    variable: str
+    offset: int
+    target: str = ""
+
+
 @dataclass
 class DefaultSpec:
     key: StateKey
-    dsp_id: int
-    read_length: int
     default_value: str
-    source_line: int
+    source: str
+
+
+@dataclass
+class DefaultCatalog:
+    common: dict[DefaultKey, dict[int, str]]
+    board_sensitive: dict[
+        DefaultKey,
+        dict[str, dict[int, str]],
+    ]
 
 
 @dataclass
@@ -301,6 +324,7 @@ class WriteCommand:
     raw_line: str
     command_type: str
     section: str
+    target: str
     dsp_id: int
     core_id: int
     variable: str
@@ -312,6 +336,16 @@ class WriteCommand:
     @property
     def key(self) -> StateKey:
         return StateKey(
+            section=self.section,
+            dsp_id=self.dsp_id,
+            core_id=self.core_id,
+            variable=self.variable,
+            offset=self.offset,
+        )
+
+    @property
+    def default_key(self) -> DefaultKey:
+        return DefaultKey(
             section=self.section,
             core_id=self.core_id,
             variable=self.variable,
@@ -386,195 +420,272 @@ def xls_cell_text(value: object) -> str:
 
 
 # ============================================================
-# 八、默认值 TXT
+# 八、JSON 默认值与版型映射
 # ============================================================
 
-def parse_default_line(
-    line: str,
-    line_number: int,
-) -> tuple[str, str, str] | None:
-    stripped = line.strip()
-
-    if not stripped or stripped.startswith("#"):
-        return None
-
-    # 优先按 TAB
-    parts = [
-        part.strip()
-        for part in line.rstrip("\r\n").split("\t")
-    ]
-
-    if len(parts) >= 3:
-        return (
-            parts[0],
-            "\t".join(parts[1:-1]).strip(),
-            parts[-1],
-        )
-
-    # 空格兜底
-    match = re.match(
-        r"^\s*"
-        r"(BBH|BBL)"
-        r"\s+"
-        r"(DSP_RSym\s*\(.*\))"
-        r"\s+"
-        r"(\S+)"
-        r"\s*$",
-        stripped,
-        flags=re.IGNORECASE,
-    )
-
-    if match is None:
-        raise ValueError(
-            f"default.txt 第 {line_number} 行格式无法识别：{stripped}"
-        )
-
-    return (
-        match.group(1),
-        match.group(2),
-        match.group(3),
-    )
-
-
-def parse_rsym(
-    command: str,
-) -> tuple[int, int, str, int] | None:
-    text = command.replace('\\"', '"')
-
-    match = RSYM_PATTERN.search(text)
-    if match is None:
-        return None
-
-    dsp_id = parse_int(match.group(1))
-    core_id = parse_int(match.group(2))
-    variable = match.group(3).strip().strip("\\")
-    read_length = parse_int(match.group(4))
-
-    if (
-        dsp_id is None
-        or core_id is None
-        or not variable
-        or read_length is None
-    ):
-        return None
-
-    return dsp_id, core_id, variable, read_length
-
-
-def load_defaults(
-    txt_path: Path,
-) -> tuple[dict[StateKey, DefaultSpec], list[StateKey]]:
-    if not txt_path.is_file():
+def load_json_object(path: Path, label: str) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8-sig") as file:
+            data = json.load(file)
+    except FileNotFoundError as exc:
         raise FileNotFoundError(
-            f"默认值 TXT 不存在：{txt_path}"
+            f"{label}不存在：{path}"
+        ) from exc
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"{label}读取失败：{path}：{exc}"
+        ) from exc
+
+    if not isinstance(data, dict):
+        raise ValueError(f"{label}顶层必须是 JSON object：{path}")
+
+    return data
+
+
+def parse_default_key(
+    section: str,
+    item: object,
+    source: str,
+) -> DefaultKey:
+    if not isinstance(item, dict):
+        raise ValueError(f"{source} 必须是 JSON object")
+
+    normalized_section = section.upper()
+    core_id = parse_int(item.get("core"))
+    offset = parse_int(item.get("offset"))
+    variable = str(item.get("variable", "")).strip()
+
+    if normalized_section not in ("BBH", "BBL"):
+        raise ValueError(f"{source} 的分组非法：{section!r}")
+    if core_id is None or offset is None or not variable:
+        raise ValueError(
+            f"{source} 缺少合法的 variable/core/offset"
         )
 
-    text = txt_path.read_text(
-        encoding="utf-8-sig"
+    return DefaultKey(
+        section=normalized_section,
+        core_id=core_id,
+        variable=variable,
+        offset=offset,
     )
 
-    defaults: dict[StateKey, DefaultSpec] = {}
-    default_order: list[StateKey] = []
 
-    for line_number, line in enumerate(
-        text.splitlines(),
-        start=1,
-    ):
-        parsed = parse_default_line(
-            line,
-            line_number,
+def parse_dsp_defaults(
+    value: object,
+    source: str,
+) -> dict[int, str]:
+    if not isinstance(value, dict) or not value:
+        raise ValueError(f"{source} 必须是非空 JSON object")
+
+    result: dict[int, str] = {}
+
+    for raw_dsp_id, raw_default in value.items():
+        dsp_id = parse_int(raw_dsp_id)
+        default_value = str(raw_default).strip()
+
+        if dsp_id is None or parse_int(default_value) is None:
+            raise ValueError(
+                f"{source} 包含非法 DSP ID 或默认值："
+                f"{raw_dsp_id!r}={raw_default!r}"
+            )
+
+        result[dsp_id] = default_value
+
+    return result
+
+
+def load_default_catalog(path: Path) -> DefaultCatalog:
+    data = load_json_object(path, "DSP 默认值 JSON")
+    common: dict[DefaultKey, dict[int, str]] = {}
+    board_sensitive: dict[
+        DefaultKey,
+        dict[str, dict[int, str]],
+    ] = {}
+
+    common_root = data.get("common", {})
+    sensitive_root = data.get("board_sensitive", {})
+
+    if not isinstance(common_root, dict):
+        raise ValueError("DSP 默认值 JSON 的 common 必须是 object")
+    if not isinstance(sensitive_root, dict):
+        raise ValueError(
+            "DSP 默认值 JSON 的 board_sensitive 必须是 object"
         )
 
-        if parsed is None:
-            continue
+    for section, items in common_root.items():
+        if not isinstance(items, dict):
+            raise ValueError(f"common.{section} 必须是 object")
 
-        section, rsym_command, default_value = parsed
-        section = section.upper()
-
-        if section not in ("BBH", "BBL"):
-            raise ValueError(
-                f"default.txt 第 {line_number} 行板型非法：{section!r}"
+        for name, item in items.items():
+            source = f"common.{section}.{name}"
+            key = parse_default_key(section, item, source)
+            dsp_defaults = parse_dsp_defaults(
+                item.get("dsp_defaults"),
+                f"{source}.dsp_defaults",
             )
 
-        # “无”完全不参与管理
-        if default_value.strip() == "无":
-            continue
+            if key in common or key in board_sensitive:
+                raise ValueError(f"DSP 默认值重复定义：{source}")
 
-        rsym = parse_rsym(rsym_command)
+            common[key] = dsp_defaults
 
-        if rsym is None:
-            raise ValueError(
-                f"default.txt 第 {line_number} 行 DSP_RSym 无法解析："
-                f"{rsym_command}"
-            )
+    for section, items in sensitive_root.items():
+        if not isinstance(items, dict):
+            raise ValueError(f"board_sensitive.{section} 必须是 object")
 
-        dsp_id, core_id, variable, read_length = rsym
+        for name, item in items.items():
+            source = f"board_sensitive.{section}.{name}"
+            key = parse_default_key(section, item, source)
+            raw_by_board = item.get("defaults_by_board")
 
-        offset = read_length - 4
-
-        if offset < 0:
-            raise ValueError(
-                f"default.txt 第 {line_number} 行读取长度={read_length}，"
-                "无法得到合法 Offset"
-            )
-
-        if offset % 4 != 0:
-            raise ValueError(
-                f"default.txt 第 {line_number} 行 Offset={offset}，"
-                "不是 4 的整数倍"
-            )
-
-        if parse_int(default_value) is None:
-            raise ValueError(
-                f"default.txt 第 {line_number} 行默认值不是合法整数："
-                f"{default_value!r}"
-            )
-
-        key = StateKey(
-            section=section,
-            core_id=core_id,
-            variable=variable,
-            offset=offset,
-        )
-
-        spec = DefaultSpec(
-            key=key,
-            dsp_id=dsp_id,
-            read_length=read_length,
-            default_value=default_value,
-            source_line=line_number,
-        )
-
-        old = defaults.get(key)
-
-        if old is not None:
-            if parse_int(old.default_value) != parse_int(default_value):
+            if not isinstance(raw_by_board, dict) or not raw_by_board:
                 raise ValueError(
-                    "default.txt 出现同一状态键不同默认值：\n"
-                    f"  key={key}\n"
-                    f"  第一次={old.default_value} "
-                    f"(line {old.source_line})\n"
-                    f"  第二次={default_value} "
-                    f"(line {line_number})"
+                    f"{source}.defaults_by_board 必须是非空 object"
                 )
+
+            defaults_by_board: dict[str, dict[int, str]] = {}
+
+            for board, dsp_values in raw_by_board.items():
+                board_name = str(board).strip()
+                if not board_name:
+                    raise ValueError(f"{source} 包含空版型名称")
+
+                defaults_by_board[board_name] = parse_dsp_defaults(
+                    dsp_values,
+                    f"{source}.defaults_by_board.{board_name}",
+                )
+
+            if key in common or key in board_sensitive:
+                raise ValueError(f"DSP 默认值重复定义：{source}")
+
+            board_sensitive[key] = defaults_by_board
+
+    return DefaultCatalog(
+        common=common,
+        board_sensitive=board_sensitive,
+    )
+
+
+def load_board_mappings(path: Path) -> dict[str, dict[str, str]]:
+    data = load_json_object(path, "环境版型映射 JSON")
+    environments = data.get("environments")
+
+    if not isinstance(environments, dict):
+        raise ValueError(
+            "环境版型映射 JSON 缺少 environments object"
+        )
+
+    result: dict[str, dict[str, str]] = {}
+
+    for ip_name, targets in environments.items():
+        if not isinstance(targets, dict):
             continue
 
-        defaults[key] = spec
-        default_order.append(key)
+        boards: dict[str, str] = {}
 
-    return defaults, default_order
+        for target, info in targets.items():
+            if not isinstance(info, dict):
+                continue
+
+            board = str(info.get("board", "")).strip()
+            if board:
+                boards[str(target).strip().lower()] = board
+
+        if boards:
+            result[str(ip_name).strip()] = boards
+
+    return result
+
+
+def resolve_default(
+    command: WriteCommand,
+    catalog: DefaultCatalog,
+    boards_by_target: dict[str, str],
+) -> DefaultSpec | None:
+    key = command.default_key
+    common_defaults = catalog.common.get(key)
+
+    if common_defaults is not None:
+        default_value = common_defaults.get(command.dsp_id)
+        if default_value is None:
+            return None
+
+        return DefaultSpec(
+            key=command.key,
+            default_value=default_value,
+            source="common",
+        )
+
+    defaults_by_board = catalog.board_sensitive.get(key)
+    if defaults_by_board is None:
+        return None
+
+    target = command.target.lower()
+    board_target = "enb0" if target == "basebandboard" else target
+    board = boards_by_target.get(board_target)
+    selected_board = None
+    default_value = None
+
+    if board is not None:
+        exact_defaults = defaults_by_board.get(board)
+        if exact_defaults is not None:
+            default_value = exact_defaults.get(command.dsp_id)
+            if default_value is not None:
+                selected_board = board
+
+    if default_value is None:
+        for candidate_board, candidate_defaults in defaults_by_board.items():
+            candidate_value = candidate_defaults.get(command.dsp_id)
+            if candidate_value is not None:
+                selected_board = candidate_board
+                default_value = candidate_value
+                break
+
+    if default_value is None:
+        selected_board, first_defaults = next(
+            iter(defaults_by_board.items())
+        )
+        default_value = next(iter(first_defaults.values()))
+
+    state_key = StateKey(
+        section=command.section,
+        dsp_id=command.dsp_id,
+        core_id=command.core_id,
+        variable=command.variable,
+        offset=command.offset,
+        target=board_target,
+    )
+
+    return DefaultSpec(
+        key=state_key,
+        default_value=default_value,
+        source=(
+            f"board_sensitive target={board_target} "
+            f"board={board or 'UNKNOWN'} selected={selected_board}"
+        ),
+    )
 
 
 # ============================================================
 # 九、AW target -> BBH / BBL
 # ============================================================
 
-def get_section_from_aw_line(line: str) -> str | None:
+def get_target_from_aw_line(line: str) -> str | None:
     match = AW_FIRST_TWO_FIELDS_PATTERN.match(line)
     if match is None:
         return None
 
-    target = match.group(2).strip().lower()
+    target = match.group(2).strip()
+
+    return target or None
+
+
+def get_section_from_aw_line(line: str) -> str | None:
+    raw_target = get_target_from_aw_line(line)
+    if raw_target is None:
+        return None
+
+    target = raw_target.lower()
 
     if target in ("basebandboard", "enb0"):
         return "BBH"
@@ -623,7 +734,8 @@ def parse_wsym_line(
         return None
 
     section = get_section_from_aw_line(line)
-    if section is None:
+    target = get_target_from_aw_line(line)
+    if section is None or target is None:
         return None
 
     command_type = normalize_command_type(
@@ -728,6 +840,7 @@ def parse_wsym_line(
         raw_line=line,
         command_type=command_type,
         section=section,
+        target=target,
         dsp_id=dsp_id,
         core_id=core_id,
         variable=variable,
@@ -1099,29 +1212,45 @@ def load_single_case(
 
 def load_ip_cases(
     ip_dir: Path,
-) -> list[CaseSource]:
+) -> tuple[list[CaseSource], int]:
     case_rows = load_case_paths(ip_dir)
 
     if not case_rows:
-        return []
+        return [], 0
 
     if (
         not ENABLE_AW_READ_CONCURRENCY
         or MAX_AW_READ_WORKERS_PER_IP <= 1
         or len(case_rows) <= 1
     ):
-        return [
-            load_single_case(
-                excel_row,
-                case_root,
-                am_value,
+        cases: list[CaseSource] = []
+        failed = 0
+
+        for excel_row, case_root, am_value in case_rows:
+            try:
+                case = load_single_case(
+                    excel_row,
+                    case_root,
+                    am_value,
+                )
+            except Exception as exc:
+                failed += 1
+                log(
+                    f"[CASE LOAD ERROR] UNIT={ip_dir.name} "
+                    f"ExcelRow={excel_row}：{exc}"
+                )
+                continue
+
+            cases.append(case)
+
+        if failed:
+            log(
+                f"[CASE LOAD SUMMARY] UNIT={ip_dir.name} "
+                f"失败={failed}，继续处理成功加载的 "
+                f"{len(cases)} 个 Case；后续历史状态可能不完整"
             )
-            for (
-                excel_row,
-                case_root,
-                am_value,
-            ) in case_rows
-        ]
+
+        return cases, failed
 
     worker_count = min(
         MAX_AW_READ_WORKERS_PER_IP,
@@ -1232,41 +1361,47 @@ def load_ip_cases(
                         f"{completed}/{len(case_rows)}"
                     )
 
-    if errors:
-        errors.sort(
-            key=lambda item: item[0]
-        )
+    errors.sort(
+        key=lambda item: item[0]
+    )
 
-        error_lines = []
-
-        for excel_row, exc in errors[:10]:
-            error_lines.append(
-                f"ExcelRow={excel_row}: {exc}"
-            )
-
-        if len(errors) > 10:
-            error_lines.append(
-                f"...另外还有 {len(errors) - 10} 个错误"
-            )
-
-        raise RuntimeError(
-            f"IP={ip_dir.name} 共有 {len(errors)} 个 AW 加载失败，"
-            "无法安全推进顺序状态：\n"
-            + "\n".join(error_lines)
+    for excel_row, exc in errors:
+        log(
+            f"[CASE LOAD ERROR] UNIT={ip_dir.name} "
+            f"ExcelRow={excel_row}：{exc}"
         )
 
     final_results: list[CaseSource] = []
 
     for index, case in enumerate(results):
         if case is None:
-            raise RuntimeError(
-                f"IP={ip_dir.name} 内部错误："
-                f"第 {index + 1} 个 Case 并发读取后没有结果"
-            )
+            excel_row = case_rows[index][0]
+            if not any(
+                failed_row == excel_row
+                for failed_row, _ in errors
+            ):
+                errors.append(
+                    (
+                        excel_row,
+                        RuntimeError("并发读取后没有结果"),
+                    )
+                )
+                log(
+                    f"[CASE LOAD ERROR] UNIT={ip_dir.name} "
+                    f"ExcelRow={excel_row}：并发读取后没有结果"
+                )
+            continue
 
         final_results.append(case)
 
-    return final_results
+    if errors:
+        log(
+            f"[CASE LOAD SUMMARY] UNIT={ip_dir.name} "
+            f"失败={len(errors)}，继续处理成功加载的 "
+            f"{len(final_results)} 个 Case；后续历史状态可能不完整"
+        )
+
+    return final_results, len(errors)
 
 
 # ============================================================
@@ -1275,10 +1410,13 @@ def load_ip_cases(
 
 def build_template_catalog(
     cases: list[CaseSource],
-    defaults: dict[StateKey, DefaultSpec],
+    catalog: DefaultCatalog,
+    boards_by_target: dict[str, str],
 ) -> tuple[
     dict[StateKey, WriteCommand],
     TemplateDiagnostics,
+    dict[StateKey, DefaultSpec],
+    list[StateKey],
 ]:
     templates: dict[
         StateKey,
@@ -1295,6 +1433,8 @@ def build_template_catalog(
     ] = defaultdict(int)
 
     parse_failed_lines: list[str] = []
+    defaults: dict[StateKey, DefaultSpec] = {}
+    default_order: list[StateKey] = []
 
     for case in cases:
         candidate_count += (
@@ -1313,13 +1453,33 @@ def build_template_catalog(
                 parse_failed_lines.append(line)
 
         for command in case.write_commands:
-            key = command.key
+            spec = resolve_default(
+                command,
+                catalog,
+                boards_by_target,
+            )
 
-            if key not in defaults:
-                unmatched_key_counts[key] += 1
+            if spec is None:
+                unmatched_key_counts[command.key] += 1
                 continue
 
+            key = spec.key
+
             managed_command_count += 1
+
+            old_spec = defaults.get(key)
+            if old_spec is None:
+                defaults[key] = spec
+                default_order.append(key)
+            elif parse_int(old_spec.default_value) != parse_int(
+                spec.default_value
+            ):
+                raise ValueError(
+                    "同一状态键解析出不同默认值：\n"
+                    f"  key={key}\n"
+                    f"  第一次={old_spec.default_value} ({old_spec.source})\n"
+                    f"  第二次={spec.default_value} ({spec.source})"
+                )
 
             if key not in templates:
                 templates[key] = command
@@ -1337,7 +1497,7 @@ def build_template_catalog(
         ),
     )
 
-    return templates, diagnostics
+    return templates, diagnostics, defaults, default_order
 
 
 def print_template_diagnostics(
@@ -1368,7 +1528,7 @@ def print_template_diagnostics(
     if diagnostics.unmatched_key_counts:
         log(
             f"[DIAG] IP={ip_name} "
-            f"已成功解析但不属于 default.txt 的 StateKey 样例："
+            f"已成功解析但不属于 DSP 默认值 JSON 的 StateKey 样例："
         )
 
         sorted_items = sorted(
@@ -1376,6 +1536,7 @@ def print_template_diagnostics(
             key=lambda item: (
                 -item[1],
                 item[0].section,
+                item[0].dsp_id,
                 item[0].core_id,
                 item[0].variable,
                 item[0].offset,
@@ -1389,6 +1550,7 @@ def print_template_diagnostics(
                 "    [UNMANAGED] "
                 f"count={count} "
                 f"{key.section} "
+                f"dsp={key.dsp_id} "
                 f"core={key.core_id} "
                 f"offset={key.offset} "
                 f"{key.variable}"
@@ -1398,16 +1560,21 @@ def print_template_diagnostics(
 
 def _remove_default_value_lines(
     text: str,
-    defaults: dict[StateKey, DefaultSpec],
+    catalog: DefaultCatalog,
+    boards_by_target: dict[str, str],
 ) -> str:
     lines = text.splitlines()
     new_lines: list[str] = []
     for line in lines:
         command = parse_wsym_line(line)
         if command is not None:
-            key = command.key
-            if key in defaults:
-                default_val = defaults[key].default_value
+            spec = resolve_default(
+                command,
+                catalog,
+                boards_by_target,
+            )
+            if spec is not None:
+                default_val = spec.default_value
                 if parse_int(command.data_token) == parse_int(default_val):
                     continue
         new_lines.append(line)
@@ -1427,13 +1594,15 @@ def build_pass1_plans(
     cases: list[CaseSource],
     defaults: dict[StateKey, DefaultSpec],
     default_order: list[StateKey],
+    catalog: DefaultCatalog,
+    boards_by_target: dict[str, str],
 ) -> tuple[list[CasePlan], int]:
     """
     按原始执行顺序动态维护受控变量状态。
 
     关键规则：
 
-    1. default.txt 只是“受控变量白名单 + 默认恢复值”，
+    1. DSP 默认值 JSON 只是“受控变量白名单 + 默认恢复值”，
        不是要求每个 IP 必须完整初始化的变量集合。
 
     2. current_state 初始为空。
@@ -1444,13 +1613,12 @@ def build_pass1_plans(
        - 当前 Case 开头不补这个变量（首次出现时）；
        - 如果写入值等于默认值，删除该 WSym 行，不推进状态；
        - 如果写入值不等于默认值，保留原始 WSym；
-       - 当前 Case 结尾恢复 default.txt 默认值（仅非默认写入的变量）；
+       - 当前 Case 结尾恢复 JSON 默认值（仅非默认写入的变量）；
        - 写入值非默认时，该变量进入 current_state，
          供下一个 Case 继承。
 
     4. 已经进入 current_state 的变量：
-       每个后续 Case 开头都显式补写历史状态，
-       即使历史值等于默认值也照样写。
+       每个后续 Case 开头都显式补写最近一次非默认历史状态。
 
     5. 当前 Case 结束时恢复：
        - 本 Case 开头补写过的全部受控变量；
@@ -1465,7 +1633,7 @@ def build_pass1_plans(
     # --------------------------------------------------------
     # 动态历史状态。
     #
-    # 初始为空，而不是把 default.txt 全部塞进来。
+    # 初始为空，而不是把 JSON 中的全部变量塞进来。
     # 只有原始 AW 真实出现过的受控变量才进入这里。
     # --------------------------------------------------------
 
@@ -1517,6 +1685,7 @@ def build_pass1_plans(
                     f"Case#{case_index} "
                     f"已有状态但没有模板："
                     f"{key.section} "
+                    f"dsp={key.dsp_id} "
                     f"core={key.core_id} "
                     f"offset={key.offset} "
                     f"{key.variable}"
@@ -1537,7 +1706,9 @@ def build_pass1_plans(
             ] = template
 
         cleaned_text = _remove_default_value_lines(
-            case.text, defaults
+            case.text,
+            catalog,
+            boards_by_target,
         )
 
         try:
@@ -1548,7 +1719,7 @@ def build_pass1_plans(
                     case.newline,
                 )
             )
-        except ValueError as exc:
+        except Exception as exc:
             pass1_failed += 1
 
             log(
@@ -1562,13 +1733,19 @@ def build_pass1_plans(
             # 当前 Case 虽然不能生成 Normalized，
             # 但原始执行顺序中的状态仍然必须继续推进。
             for command in case.write_commands:
-                key = command.key
+                spec = resolve_default(
+                    command,
+                    catalog,
+                    boards_by_target,
+                )
 
-                if key not in defaults:
+                if spec is None:
                     continue
 
+                key = spec.key
+
                 if parse_int(command.data_token) == parse_int(
-                    defaults[key].default_value
+                    spec.default_value
                 ):
                     continue
 
@@ -1583,7 +1760,7 @@ def build_pass1_plans(
             continue
 
         # ====================================================
-        # 2. 当前 Case 自己写过的受控变量
+        # 2. 当前 Case 自己写过非默认值的受控变量
         #
         # 同一状态项写多次时取最后一次，作为：
         #   - Case 结束后的历史状态；
@@ -1596,13 +1773,19 @@ def build_pass1_plans(
         ] = {}
 
         for command in case.write_commands:
-            key = command.key
+            spec = resolve_default(
+                command,
+                catalog,
+                boards_by_target,
+            )
 
-            if key not in defaults:
+            if spec is None:
                 continue
 
+            key = spec.key
+
             if parse_int(command.data_token) == parse_int(
-                defaults[key].default_value
+                spec.default_value
             ):
                 continue
 
@@ -1616,7 +1799,7 @@ def build_pass1_plans(
         # 恢复集合 =
         #   前置补写的受控变量
         #   ∪
-        #   当前 Case 原始 AW 自己写过的受控变量
+        #   当前 Case 原始 AW 自己写过非默认值的受控变量
         # ====================================================
 
         recovery_lines: list[str] = []
@@ -1628,7 +1811,7 @@ def build_pass1_plans(
             ):
                 continue
 
-            # 当前 Case 自己写过时，优先使用本 Case 最后一次
+            # 当前 Case 自己写过非默认值时，优先使用本 Case 最后一次
             # 真实 WSym 格式；否则使用入口补写所用模板。
             template = (
                 case_last_write.get(key)
@@ -1642,6 +1825,7 @@ def build_pass1_plans(
                     f"Case#{case_index} "
                     f"无法找到恢复模板："
                     f"{key.section} "
+                    f"dsp={key.dsp_id} "
                     f"core={key.core_id} "
                     f"offset={key.offset} "
                     f"{key.variable}"
@@ -1677,13 +1861,19 @@ def build_pass1_plans(
         # ====================================================
 
         for command in case.write_commands:
-            key = command.key
+            spec = resolve_default(
+                command,
+                catalog,
+                boards_by_target,
+            )
 
-            if key not in defaults:
+            if spec is None:
                 continue
 
+            key = spec.key
+
             if parse_int(command.data_token) == parse_int(
-                defaults[key].default_value
+                spec.default_value
             ):
                 continue
 
@@ -1705,7 +1895,8 @@ def build_pass1_plans(
 def execute_pass2(
     ip_name: str,
     plans: list[CasePlan],
-    defaults: dict[StateKey, DefaultSpec],
+    catalog: DefaultCatalog,
+    boards_by_target: dict[str, str],
 ) -> tuple[int, int]:
     success = 0
     failed = 0
@@ -1724,7 +1915,7 @@ def execute_pass2(
                     case.newline,
                 )
             )
-        except ValueError as exc:
+        except Exception as exc:
             failed += 1
 
             log(
@@ -1737,10 +1928,19 @@ def execute_pass2(
 
             continue
 
-        if (
-            not OVERWRITE_NORMALIZED
-            and case.output_aw.exists()
-        ):
+        try:
+            output_exists = case.output_aw.exists()
+        except Exception as exc:
+            failed += 1
+
+            log(
+                f"[CASE ERROR] IP={ip_name} "
+                f"ExcelRow={case.excel_row} "
+                f"检查输出路径失败，跳过该 Case：{exc}"
+            )
+            continue
+
+        if not OVERWRITE_NORMALIZED and output_exists:
             failed += 1
 
             log(
@@ -1755,7 +1955,7 @@ def execute_pass2(
                 final_text,
                 case.encoding,
             )
-        except OSError as exc:
+        except Exception as exc:
             failed += 1
 
             log(
@@ -1774,7 +1974,9 @@ def execute_pass2(
         ):
             try:
                 axcauto_cleaned = _remove_default_value_lines(
-                    case.axcauto_text, defaults
+                    case.axcauto_text,
+                    catalog,
+                    boards_by_target,
                 )
                 axcauto_pass1 = insert_after_testctrlinfo(
                     axcauto_cleaned,
@@ -1791,7 +1993,7 @@ def execute_pass2(
                     axcauto_final,
                     case.encoding,
                 )
-            except (ValueError, OSError) as exc:
+            except Exception as exc:
                 log(
                     f"[AXCAUTO WRITE WARN] "
                     f"IP={ip_name} "
@@ -1970,14 +2172,22 @@ def find_ip_units(
 
 def process_ip(
     ip_dir: Path,
-    defaults: dict[StateKey, DefaultSpec],
-    default_order: list[StateKey],
+    catalog: DefaultCatalog,
+    board_mappings: dict[str, dict[str, str]],
 ) -> tuple[int, int]:
     ip_name = ip_dir.name
 
     log("=" * 90)
     log(f"[IP] {ip_name}")
     log("=" * 90)
+
+    boards_by_target = board_mappings.get(ip_name)
+    if boards_by_target is None:
+        log(
+            f"[SKIP IP] {ip_name}："
+            "环境版型映射 JSON 中不存在该 IP"
+        )
+        return 0, 0
 
     # --------------------------------------------------------
     # 发现所有包含执行表的处理单元
@@ -2017,7 +2227,7 @@ def process_ip(
         log("-" * 70)
 
         try:
-            cases = load_ip_cases(
+            cases, load_failed = load_ip_cases(
                 unit_dir
             )
         except Exception as exc:
@@ -2027,42 +2237,58 @@ def process_ip(
             total_failed += 1
             continue
 
+        total_failed += load_failed
+
         log(
-            f"[INPUT] UNIT={unit_label} Case数量={len(cases)}"
+            f"[INPUT] UNIT={unit_label} "
+            f"成功加载Case={len(cases)}，加载失败={load_failed}"
         )
 
         if not cases:
             log(
                 f"[ABORT UNIT] {unit_label}：执行表没有有效 Case"
             )
-            total_failed += 1
+            if load_failed == 0:
+                total_failed += 1
             continue
 
         # ------------------------------------------------
         # 只做诊断：
         #
-        # default.txt 中有多少变量，并不要求当前 IP 全部出现。
+        # DSP 默认值 JSON 中有多少变量，并不要求当前 IP 全部出现。
         # 当前 IP 实际出现几个受控 StateKey，就只处理几个。
         # ------------------------------------------------
 
-        (
-            observed_templates,
-            diagnostics,
-        ) = build_template_catalog(
-            cases,
-            defaults,
-        )
+        try:
+            (
+                observed_templates,
+                diagnostics,
+                defaults,
+                default_order,
+            ) = build_template_catalog(
+                cases,
+                catalog,
+                boards_by_target,
+            )
 
-        log(
-            f"[CONTROLLED] UNIT={unit_label} "
-            f"default.txt受控变量={len(defaults)}，"
-            f"当前单元实际出现受控Key={len(observed_templates)}"
-        )
+            log(
+                f"[CONTROLLED] UNIT={unit_label} "
+                f"JSON逻辑变量="
+                f"{len(catalog.common) + len(catalog.board_sensitive)}，"
+                f"当前单元实际出现受控Key={len(observed_templates)}"
+            )
 
-        print_template_diagnostics(
-            unit_label,
-            diagnostics,
-        )
+            print_template_diagnostics(
+                unit_label,
+                diagnostics,
+            )
+        except Exception as exc:
+            log(
+                f"[UNIT ERROR] {unit_label} "
+                f"模板和默认值解析失败，跳过该处理单元：{exc}"
+            )
+            total_failed += 1
+            continue
 
         # ------------------------------------------------
         # Pass 1
@@ -2073,14 +2299,24 @@ def process_ip(
             "开始按原始顺序动态继承已出现的受控变量..."
         )
 
-        plans, pass1_failed = (
-            build_pass1_plans(
-                ip_name=unit_label,
-                cases=cases,
-                defaults=defaults,
-                default_order=default_order,
+        try:
+            plans, pass1_failed = (
+                build_pass1_plans(
+                    ip_name=unit_label,
+                    cases=cases,
+                    defaults=defaults,
+                    default_order=default_order,
+                    catalog=catalog,
+                    boards_by_target=boards_by_target,
+                )
             )
-        )
+        except Exception as exc:
+            log(
+                f"[UNIT ERROR] {unit_label} "
+                f"Pass 1 未知异常，跳过该处理单元：{exc}"
+            )
+            total_failed += 1
+            continue
 
         log(
             f"[PASS 1] UNIT={unit_label} "
@@ -2097,16 +2333,27 @@ def process_ip(
             "开始恢复前置变量和当前Case受控变量到默认值..."
         )
 
-        success, pass2_failed = execute_pass2(
-            unit_label,
-            plans,
-            defaults,
-        )
+        try:
+            success, pass2_failed = execute_pass2(
+                unit_label,
+                plans,
+                catalog,
+                boards_by_target,
+            )
+        except Exception as exc:
+            log(
+                f"[UNIT ERROR] {unit_label} "
+                f"Pass 2 未知异常，跳过该处理单元：{exc}"
+            )
+            total_failed += 1
+            continue
 
-        unit_failed = (
+        processing_failed = (
             pass1_failed
             + pass2_failed
         )
+
+        unit_failed = load_failed + processing_failed
 
         log(
             f"[UNIT DONE] {unit_label}："
@@ -2114,7 +2361,7 @@ def process_ip(
         )
 
         total_success += success
-        total_failed += unit_failed
+        total_failed += processing_failed
 
     log(
         f"[IP DONE] {ip_name}："
@@ -2150,33 +2397,29 @@ def main() -> None:
         log("=" * 90)
 
         # ----------------------------------------------------
-        # 默认变量
+        # 默认变量与环境版型
         # ----------------------------------------------------
 
-        defaults, default_order = (
-            load_defaults(
-                DEFAULT_VALUE_TXT
-            )
+        catalog = load_default_catalog(
+            DSP_DEFAULTS_JSON
         )
 
-        bbh_count = sum(
-            1
-            for key in defaults
-            if key.section == "BBH"
+        board_mappings = load_board_mappings(
+            BOARD_MAPPING_JSON
         )
 
-        bbl_count = sum(
-            1
-            for key in defaults
-            if key.section == "BBL"
+        common_count = len(catalog.common)
+        sensitive_count = len(
+            catalog.board_sensitive
         )
 
         log(
-            f"[DEFAULT] 有效受管变量：{len(defaults)}"
+            f"[DEFAULT] common变量={common_count}，"
+            f"board_sensitive变量={sensitive_count}"
         )
 
         log(
-            f"[DEFAULT] BBH={bbh_count}，BBL={bbl_count}"
+            f"[BOARD] 已映射IP={len(board_mappings)}"
         )
 
         # ----------------------------------------------------
@@ -2242,11 +2485,20 @@ def main() -> None:
 
         if actual_ip_workers == 1:
             for ip_dir in ip_dirs:
-                success, failed = process_ip(
-                    ip_dir,
-                    defaults,
-                    default_order,
-                )
+                try:
+                    success, failed = process_ip(
+                        ip_dir,
+                        catalog,
+                        board_mappings,
+                    )
+                except Exception as exc:
+                    success = 0
+                    failed = 1
+
+                    log(
+                        f"[IP ERROR] {ip_dir.name}：{exc}；"
+                        "已跳过该 IP，继续处理后续 IP"
+                    )
 
                 ip_results[ip_dir.name] = (
                     success,
@@ -2270,8 +2522,8 @@ def main() -> None:
                     executor.submit(
                         process_ip,
                         ip_dir,
-                        defaults,
-                        default_order,
+                        catalog,
+                        board_mappings,
                     ): ip_dir
                     for ip_dir in ip_dirs
                 }
