@@ -1,5 +1,3 @@
-当前模型：GPT-5.6 Sol。
-
 # Stage5-Phase1-WP4-B — LLM Judge Core + Adapter + Integration 学习 / 面试总结
 
 推荐文件名：
@@ -223,8 +221,6 @@ Reference Answer
 → GroundTruth.generation.reference_answer
 ```
 
-42_wp4b_llm_judge_implementation.mdMD
-
 最重要的一点：
 
 ```
@@ -353,8 +349,6 @@ threshold
 metric_name
 prompt_version
 ```
-
-42_wp4b_llm_judge_implementation.mdMD
 
 这是非常关键的 Authority Boundary（权威边界）。
 
