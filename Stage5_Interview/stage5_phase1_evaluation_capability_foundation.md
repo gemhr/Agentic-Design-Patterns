@@ -415,11 +415,14 @@ Recall@K 解决：
 
 公式：
 
+$$
 [
 Recall@K =
 \frac{|Relevant \cap Retrieved@K|}
 {|Relevant|}
 ]
+$$
+
 
 ------
 
@@ -491,11 +494,11 @@ MRR（Mean Reciprocal Rank，平均倒数排名）解决：
 > 第一条 Relevant Result 到底排第几？
 
 单 Case：
-
+$$
 [
 RR = 1 / rank_{first-relevant}
 ]
-
+$$
 例如：
 
 ```text
